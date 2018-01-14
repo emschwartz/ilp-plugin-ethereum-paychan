@@ -1,9 +1,10 @@
+'use strict'
+
 const express = require('express')
 const Web3 = require('web3')
 const Machinomy = require('machinomy').default
 const Payment = require('machinomy/lib/payment').default
 const bodyParser = require('body-parser')
-const ganache = require('ganache-cli')
 const promisify = require('util').promisify
 const fetch = require('node-fetch')
 const debug = require('debug')('ilp-plugin-ethereum-paychan')
@@ -33,6 +34,8 @@ class PluginEthereumPaychan {
   }
 
   async connect () {
+    // TODO preemtively open a payment channel to the receiver? (https://github.com/machinomy/machinomy/issues/123)
+
     debug('connecting')
     if (!this.account) {
       const accounts = await promisify(web3.eth.getAccounts)()
@@ -55,10 +58,10 @@ class PluginEthereumPaychan {
     }
 
     if (this.port) {
-      // TODO switch to koa
-      const listener = express()
+      // TODO switch to koa or plain http(s) server
+      const app = express()
 
-      listener.get('/', (req, res) => {
+      app.get('/', (req, res) => {
         debug('got connection from:', req.ip)
         res.send({
           account: this.account
@@ -67,7 +70,7 @@ class PluginEthereumPaychan {
         res.end()
       })
 
-      listener.post('/money', bodyParser.json(), async (req, res, next) => {
+      app.post('/money', bodyParser.json(), async (req, res, next) => {
         const payment = new Payment(req.body)
         debug('got payment:', payment)
         const token = await this.machinomy.acceptPayment(payment)
@@ -77,16 +80,14 @@ class PluginEthereumPaychan {
         res.end()
       })
 
-      listener.post('/data', bodyParser.raw(), async (req, res, next) => {
+      app.post('/data', bodyParser.raw(), async (req, res, next) => {
         debug('got data:', req.body.toString('hex'))
         const response = await this.dataHandler(req.body)
         res.send(response)
         res.end()
       })
 
-      listener.listen(this.port)
-
-      this.listener = listener
+      this.listener = app.listen(this.port)
       debug('listening on port:', this.port)
     }
 
@@ -96,15 +97,17 @@ class PluginEthereumPaychan {
   async disconnect () {
     debug('disconnect')
     // Stop accepting data and money
-    this.listener.close()
+    if (this.listener) {
+      this.listener.close()
+    }
 
     // Close existing channels
     for (let channel of await this.machinomy.channels()) {
       try {
-        await machinomy.close(channel.channelId)
+        await this.machinomy.close(channel.channelId)
         debug('closed channel:', channel.channelId)
       } catch (err) {
-        console.error('error closing channel:', channel.channelId)
+        console.error('error closing channel:', channel.channelId, err)
       }
     }
   }
@@ -131,6 +134,7 @@ class PluginEthereumPaychan {
       receiver: this.peerAccount,
       meta: ''
     })
+    return
   }
 
   registerDataHandler (handler) {
@@ -151,34 +155,6 @@ class PluginEthereumPaychan {
 }
 PluginEthereumPaychan.version = 2
 
-async function main () {
-  const provider = new Web3.providers.HttpProvider(DEFAULT_PROVIDER_URI)
-  const web3 = new Web3(provider)
-  const accounts = await promisify(web3.eth.getAccounts)()
-  const senderAccount = accounts[0]
-  const receiverAccount = accounts[1]
+// TODO use es6 modules style export?
+module.exports = PluginEthereumPaychan
 
-  const sender = new PluginEthereumPaychan({
-    account: senderAccount,
-    server: 'http://localhost:3000',
-    db: 'sender_db'
-  })
-  const receiver = new PluginEthereumPaychan({
-    account: receiverAccount,
-    port: 3000,
-    db: 'receiver_db'
-  })
-  receiver.registerDataHandler((buffer) => Promise.resolve(Buffer.alloc(32, 255)))
-  receiver.registerMoneyHandler((amount) => console.log('receiver got:', amount))
-
-  await receiver.connect()
-  await sender.connect()
-
-  const response = await sender.sendData(Buffer.alloc(32, 0))
-  console.log('receiver responded:', response.toString('hex'))
-  await sender.sendMoney(1)
-
-  process.exit(0)
-}
-
-main().catch(err => console.log(err))

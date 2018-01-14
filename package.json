@@ -2,9 +2,8 @@
   "name": "ilp-plugin-ethereum-paychan",
   "version": "0.1.0",
   "description": "",
-  "main": "src/index.js",
+  "main": "plugin.js",
   "scripts": {
-    "build": "tsc",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
@@ -28,9 +27,6 @@
     "node-fetch": "^1.7.3"
   },
   "devDependencies": {
-    "@types/node": "^9.3.0",
-    "ganache-cli": "^6.0.3",
-    "source-map-support": "^0.5.0",
-    "typescript": "^2.6.2"
+    "ganache-cli": "^6.0.3"
   }
 }
