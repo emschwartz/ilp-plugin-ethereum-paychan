@@ -12,12 +12,13 @@ const debug = require('debug')('ilp-plugin-ethereum-paychan')
 const DEFAULT_PROVIDER_URI = 'http://localhost:8545'
 
 class PluginEthereumPaychan {
-  constructor ({ port, server, provider, account, db }) {
+  constructor ({ port, server, provider, account, db, minimumChannelAmount }) {
     this.port = port
     this.server = server
     this.account = account || ''
     this.peerAccount = ''
     this.db = db || 'machinomy_db'
+    this.minimumChannelAmount = (typeof minimumChannelAmount === 'number' ? minimumChannelAmount : 100)
 
     if (typeof provider === 'string') {
       this.provider = new Web3.providers.HttpProvider(provider)
@@ -34,8 +35,6 @@ class PluginEthereumPaychan {
   }
 
   async connect () {
-    // TODO preemtively open a payment channel to the receiver? (https://github.com/machinomy/machinomy/issues/123)
-
     debug('connecting')
     if (!this.account) {
       const accounts = await promisify(web3.eth.getAccounts)()
@@ -44,7 +43,11 @@ class PluginEthereumPaychan {
       }
       this.account = accounts[0]
     }
-    this.machinomy = new Machinomy(this.account, this.web3, { engine: 'nedb', databaseFile: this.db })
+    this.machinomy = new Machinomy(this.account, this.web3, {
+      engine: 'nedb',
+      databaseFile: this.db,
+      minimumChannelAmount: this.minimumChannelAmount
+    })
 
     if (this.server) {
       debug('attempting to connect to peer')
@@ -55,6 +58,17 @@ class PluginEthereumPaychan {
       const body = await result.json()
       this.peerAccount = body.account
       debug('connected to peer')
+    }
+
+    // Make sure there is an open channel to the receiver so that we don't have to wait when we want to send payments
+    // Based on suggestion in https://github.com/machinomy/machinomy/issues/123#issuecomment-357537398
+    if (this.server) {
+      await this.machinomy.buy({
+        price: 0,
+        gateway: this.server + '/money',
+        receiver: this.peerAccount,
+        meta: ''
+      })
     }
 
     if (this.port) {
@@ -74,7 +88,9 @@ class PluginEthereumPaychan {
         const payment = new Payment(req.body)
         debug('got payment:', payment)
         const token = await this.machinomy.acceptPayment(payment)
-        await this.moneyHandler('' + payment.price)
+        if (payment.price > 0) {
+          await this.moneyHandler('' + payment.price)
+        }
         res.header('Paywall-Token', token)
         res.status(200)
         res.end()

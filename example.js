@@ -1,7 +1,9 @@
 const PluginEthereumPaychan = require('./plugin')
+const Web3 = require('web3')
+const promisify = require('util').promisify
 
 async function main () {
-  const provider = new Web3.providers.HttpProvider(DEFAULT_PROVIDER_URI)
+  const provider = new Web3.providers.HttpProvider('http://localhost:8545')
   const web3 = new Web3(provider)
   const accounts = await promisify(web3.eth.getAccounts)()
   const senderAccount = accounts[0]
@@ -18,7 +20,7 @@ async function main () {
     db: 'receiver_db'
   })
   receiver.registerDataHandler((buffer) => Promise.resolve(Buffer.alloc(32, 255)))
-  receiver.registerMoneyHandler((amount) => console.log('receiver got:', amount))
+  receiver.registerMoneyHandler((amount) => console.log(`receiver got: ${amount} unit of money`))
 
   await receiver.connect()
   await sender.connect()
